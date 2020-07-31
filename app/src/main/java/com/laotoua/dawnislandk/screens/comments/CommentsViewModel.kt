@@ -23,6 +23,7 @@ import com.laotoua.dawnislandk.DawnApp
 import com.laotoua.dawnislandk.data.local.entity.Comment
 import com.laotoua.dawnislandk.data.repository.CommentRepository
 import com.laotoua.dawnislandk.data.repository.QuoteRepository
+import com.laotoua.dawnislandk.screens.util.ContentTransformation
 import com.laotoua.dawnislandk.util.*
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -215,9 +216,13 @@ class CommentsViewModel @Inject constructor(
         listenToNewPage(page)
     }
 
+    fun getExternalShareContent():String{
+        return "${ContentTransformation.htmlToSpanned(commentRepo.getHeaderPost(currentPostId)?.content.toString())}\n\n${DawnConstants.nmbHost}/t/${currentPostId}\n"
+    }
+
     fun addFeed(id: String) {
         viewModelScope.launch {
-            addFeedResponse.postValue(commentRepo.addFeed(DawnApp.applicationDataStore.feedId, id))
+            addFeedResponse.postValue(commentRepo.addFeed(DawnApp.applicationDataStore.getFeedId(), id))
         }
     }
 }

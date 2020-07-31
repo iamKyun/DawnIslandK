@@ -111,6 +111,9 @@
         <item>༼　•͟ ͜ •　༽\n༽ つд⊂ ༼</item>
         <item>(ᯣ ̶̵̵̵̶̶̶̶̵̫̋̋̅̅̅ᯣ )</item>
         <item>[h][/h]</item>
+        <item>(ﾉ)`ω´(ヾ)</item>
+        <item>( ´◔ ‸◔`)</item>
+        <item>( ﾟᯅ 。)</item>
     </string-array>
 
     <string-array name="LuweiStickersWhite">
@@ -363,6 +366,12 @@
         <item>读取本地二维码</item>
         <item>扫描二维码</item>
         <item>手动输入</item>
+    </string-array>
+
+    <string-array name="app_feedback_options">
+        <item>统一串</item>
+        <item>Github</item>
+        <item>发邮件</item>
     </string-array>
 
     <string-array name="post_options">

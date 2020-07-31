@@ -111,7 +111,6 @@ class MainActivity : DaggerAppCompatActivity() {
     init {
         // load Resources
         lifecycleScope.launchWhenCreated { loadResources() }
-        applicationDataStore.initializeFeedId()
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -211,14 +210,23 @@ class MainActivity : DaggerAppCompatActivity() {
             if (this.isFinishing) return@let
             MaterialDialog(this).show {
                 title(R.string.found_new_version)
+                icon(R.mipmap.ic_launcher)
                 message(text = release.message) { html() }
-                positiveButton(R.string.download_latest_version) {
+                positiveButton(R.string.download_from_github) {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(release.downloadUrl))
                     if (intent.resolveActivity(packageManager) != null) {
                         startActivity(intent)
                     }
                 }
-                negativeButton(R.string.acknowledge) {
+                negativeButton(R.string.download_from_google_play){
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.laotoua.dawnislandk"))
+                    if (intent.resolveActivity(packageManager) != null) {
+                        startActivity(intent)
+                    }
+                }
+
+                @Suppress("DEPRECATION")
+                neutralButton(R.string.acknowledge) {
                     dismiss()
                 }
             }
@@ -373,18 +381,21 @@ class MainActivity : DaggerAppCompatActivity() {
         )
     }
 
+    private var toolbarAnim:Animator? = null
     fun setToolbarTitle(newTitle: String) {
         val oldTitle = binding.toolbar.title.toString()
         if (oldTitle == newTitle) return
+        toolbarAnim?.cancel()
         val animCharCount = max(oldTitle.length, newTitle.length)
-        ValueAnimator.ofObject(StringEvaluator(animCharCount), binding.toolbar.title, newTitle).apply {
+        toolbarAnim = ValueAnimator.ofObject(StringEvaluator(animCharCount), binding.toolbar.title, newTitle).apply {
             duration = animCharCount.toLong() * 60
             start()
             addUpdateListener {
                 binding.toolbar.title = it.animatedValue as String
                 binding.toolbar.invalidate()
             }
-        }.start()
+        }
+        toolbarAnim?.start()
     }
 
     fun setToolbarTitle(resId: Int) {
