@@ -31,8 +31,8 @@ import androidx.fragment.app.Fragment
 import com.google.android.material.card.MaterialCardView
 import com.laotoua.dawnislandk.DawnApp
 import com.laotoua.dawnislandk.R
-import com.laotoua.dawnislandk.screens.MainActivity
 import com.laotoua.dawnislandk.screens.posts.PostCardFactory
+import com.laotoua.dawnislandk.screens.util.Layout.toast
 import com.laotoua.dawnislandk.screens.widgets.spans.RoundBackgroundColorSpan
 import com.laotoua.dawnislandk.screens.widgets.spans.SegmentSpacingSpan
 import com.laotoua.dawnislandk.util.DawnConstants
@@ -76,8 +76,6 @@ class SizesCustomizationFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        // hide NavBar
-        (requireActivity() as MainActivity).hideNav()
 
         rootView.setPaddingRelative(10, 10, 10, 10)
         rootView.orientation = LinearLayout.VERTICAL
@@ -400,15 +398,10 @@ class SizesCustomizationFragment : Fragment() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        (requireActivity() as MainActivity).setToolbarTitle(R.string.layout_customization)
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         if (settingsChanged) {
-            Toast.makeText(context, R.string.restart_to_apply_setting, Toast.LENGTH_SHORT).show()
+            toast(R.string.restart_to_apply_setting)
         }
     }
 }

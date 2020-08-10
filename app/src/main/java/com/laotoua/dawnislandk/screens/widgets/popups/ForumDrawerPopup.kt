@@ -21,11 +21,14 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.widget.Button
 import android.widget.ImageView
+import androidx.navigation.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.laotoua.dawnislandk.MainNavDirections
 import com.laotoua.dawnislandk.R
 import com.laotoua.dawnislandk.data.local.entity.Community
 import com.laotoua.dawnislandk.data.local.entity.Forum
+import com.laotoua.dawnislandk.screens.MainActivity
 import com.laotoua.dawnislandk.screens.SharedViewModel
 import com.laotoua.dawnislandk.screens.adapters.CommunityNodeAdapter
 import com.laotoua.dawnislandk.util.GlideApp
@@ -45,13 +48,18 @@ class ForumDrawerPopup(
             override fun onForumClick(forum: Forum) {
                 Timber.d("Clicked on Forum ${forum.name}")
                 dismissWith {
-                    sharedVM.setForumId(forum.id)
+                    if (forum.isFakeForum()){
+                        val action = MainNavDirections.actionGlobalCommentsFragment(forum.id, "")
+                        (context as MainActivity).findNavController(R.id.navHostFragment).navigate(action)
+                    } else {
+                        sharedVM.setForumId(forum.id)
+                    }
                 }
             }
         })
 
     private var reedImageUrl: String = ""
-    private lateinit var reedImageView: ImageView
+    private var reedImageView: ImageView? = null
 
     fun setData(list: List<Community>) {
         forumListAdapter.setData(list)
@@ -65,23 +73,21 @@ class ForumDrawerPopup(
     }
 
     fun loadReedPicture() {
-        GlideApp.with(reedImageView)
-            .load(reedImageUrl)
-            .placeholder(R.drawable.placeholder)
-            .fitCenter()
-            .into(reedImageView)
+        reedImageView?.run {
+            GlideApp.with(this)
+                .load(reedImageUrl)
+                .placeholder(R.drawable.placeholder)
+                .fitCenter()
+                .into(this)
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
 
-        findViewById<Button>(R.id.forumRefresh).setOnClickListener {
-            forumListAdapter.setData(emptyList())
-            sharedVM.forumRefresh()
-        }
         reedImageView = findViewById(R.id.reedImageView)
         if (reedImageUrl.isNotBlank()) loadReedPicture()
-        reedImageView.setOnClickListener {
+        reedImageView!!.setOnClickListener {
             if (reedImageUrl.isBlank()) return@setOnClickListener
             val viewerPopup = ImageViewerPopup(context)
             viewerPopup.setSingleSrcView(reedImageView, reedImageUrl)
@@ -91,9 +97,8 @@ class ForumDrawerPopup(
         }
 
         findViewById<Button>(R.id.ReedPictureRefresh).setOnClickListener {
-            reedImageView.setImageResource(R.drawable.placeholder)
-            sharedVM.getRandomReedPicture()
             reedImageUrl = ""
+            sharedVM.getRandomReedPicture()
         }
 
         findViewById<RecyclerView>(R.id.forumContainer).apply {

@@ -64,15 +64,10 @@ class SharedViewModel @Inject constructor(
 
     private var forumMsgMapping = mapOf<String, String>()
 
+    var forumRefresh = false
 
     init {
         getRandomReedPicture()
-    }
-
-    fun forumRefresh() {
-        viewModelScope.launch {
-            communityRepository.refresh()
-        }
     }
 
     fun setForumMappings(list: List<Community>) {
@@ -94,6 +89,7 @@ class SharedViewModel @Inject constructor(
 
     fun setForumId(fid: String) {
         Timber.d("Setting forum to id: $fid")
+        forumRefresh = _selectedForumId.value == fid
         _selectedForumId.value = fid
     }
 
@@ -267,5 +263,11 @@ class SharedViewModel @Inject constructor(
             }
         }
         searchCommentInPost(draft, targetPage - 1, targetPageUpperBound)
+    }
+
+    fun saveCommonCommunity(commonCommunity: Community){
+        viewModelScope.launch {
+            communityRepository.saveCommonCommunity(commonCommunity)
+        }
     }
 }

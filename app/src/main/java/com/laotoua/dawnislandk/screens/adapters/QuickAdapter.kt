@@ -150,7 +150,7 @@ class QuickAdapter<T>(
         convertRefId(context, item.id)
         convertTimeStamp(item.now)
         convertForumAndReplyCount(item.replyCount, forumDisplayName)
-        convertSage(item.sage, item.skipSageConversion())
+        convertSage(item.sage, item.isStickyTopBanner())
         convertImage(item.getImgUrl())
         convertContent(context, item.content)
     }
@@ -253,7 +253,9 @@ class QuickAdapter<T>(
                             && oldItem.title == newItem.title
                             && oldItem.name == newItem.name
                 }
-                (oldItem is Trend && newItem is Trend) -> true
+                (oldItem is Trend && newItem is Trend) -> {
+                    oldItem.rank == newItem.rank && oldItem.hits == newItem.hits
+                }
                 else -> throw Exception("Unhandled type comparison")
             }
         }

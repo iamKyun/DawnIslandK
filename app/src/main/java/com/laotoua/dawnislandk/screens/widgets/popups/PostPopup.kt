@@ -87,6 +87,7 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
     private var toggleContainers: ConstraintLayout? = null
     private var expansionContainer: LinearLayout? = null
     private var attachmentContainer: ConstraintLayout? = null
+    private var buttonToggleGroup: MaterialButtonToggleGroup? = null
     private var emojiContainer: RecyclerView? = null
     private val emojiAdapter by lazyOnMainOnly { QuickAdapter<String>(R.layout.grid_item_emoji) }
     private var luweiStickerContainer: ConstraintLayout? = null
@@ -101,13 +102,12 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
     private var postImagePreview: ImageView? = null
 
     // keyboard height listener
-    private var keyboardHeight = -1
     private var keyboardHolder: LinearLayout? = null
 
     private fun updateTitle(targetId: String?, newPost: Boolean) {
         findViewById<TextView>(R.id.postTitle).text =
             if (newPost) "${context.getString(R.string.new_post)} > ${getForumTitle(targetId!!)}"
-            else "${context.getString(R.string.new_comment)} > $targetId"
+            else "${context.getString(R.string.reply_comment)} > $targetId"
     }
 
     private fun getForumTitle(targetId: String): String {
@@ -144,12 +144,7 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
         updateTitle(targetId, newPost)
         updateCookies()
         updateForumButton(targetId, newPost)
-        quote?.run {
-            postContent!!.text.insert(
-                0,
-                quote
-            )
-        }
+        quote?.run { postContent?.text?.insert(0, quote) }
     }
 
     fun setupAndShow(
@@ -159,16 +154,17 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
         targetPage: Int = 1,
         quote: String? = null
     ) {
+        this.targetPage = targetPage
+        this.targetFid = targetFid
         XPopup.Builder(context)
             .setPopupCallback(object : SimpleCallback() {
                 override fun beforeShow(popupView: BasePopupView?) {
                     super.beforeShow(popupView)
-                    (popupView as PostPopup?)?.targetPage = targetPage
-                    popupView?.targetFid = targetFid
                     updateView(targetId, newPost, quote)
                 }
             })
             .enableDrag(false)
+            .moveUpToKeyboard(false)
             .asCustom(this)
             .show()
     }
@@ -179,25 +175,29 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
 
     override fun onShow() {
         super.onShow()
+
         KeyboardUtils.registerSoftInputChangedListener(caller.window, this) { height ->
-            if (height > 0 && keyboardHeight != height) {
-                keyboardHeight = height
-                listOf(emojiContainer!!, luweiStickerContainer!!).map {
-                    val lp = it.layoutParams
-                    lp.height = keyboardHeight
-                    it.layoutParams = lp
+            if (height > 0) {
+                listOf(emojiContainer, luweiStickerContainer).map {
+                    val lp = it?.layoutParams
+                    lp?.height = height
+                    it?.layoutParams = lp
                 }
             }
-            val lp = keyboardHolder!!.layoutParams
-            lp.height = height
-            keyboardHolder!!.layoutParams = lp
+            val lp = keyboardHolder?.layoutParams
+            lp?.height = height
+            keyboardHolder?.layoutParams = lp
+            if (height > 0) {
+                buttonToggleGroup?.uncheck(R.id.postFace)
+                buttonToggleGroup?.uncheck(R.id.postLuwei)
+            }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+
         postContent = findViewById<EditText>(R.id.postContent).apply {
-            KeyboardUtils.showSoftInput(this)
             setOnClickListener { view -> KeyboardUtils.showSoftInput(view) }
         }
 
@@ -248,11 +248,15 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
                             context.packageName
                         )
                         imageFile = ImageUtil.getFileFromDrawable(caller, emojiId, resourceId)
-                        if (imageFile != null){
+                        if (imageFile != null) {
                             postImagePreview!!.setImageResource(resourceId)
                             attachmentContainer!!.visibility = View.VISIBLE
                         } else {
-                            Toast.makeText(context, R.string.cannot_load_image_file, Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                R.string.cannot_load_image_file,
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
 
@@ -303,13 +307,14 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
             send()
         }
 
-        findViewById<MaterialButtonToggleGroup>(R.id.toggleButtonGroup)
-            .addOnButtonCheckedListener { toggleGroup, checkedId, isChecked ->
+        findViewById<MaterialButtonToggleGroup>(R.id.toggleButtonGroup).apply {
+            buttonToggleGroup = this
+            addOnButtonCheckedListener { toggleGroup, checkedId, isChecked ->
                 when (checkedId) {
                     R.id.postExpand -> {
                         expansionContainer!!.visibility = if (isChecked) View.VISIBLE else View.GONE
                         toggleGroup.findViewById<Button>(R.id.postExpand)?.run {
-                            if (isChecked){
+                            if (isChecked) {
                                 animate().setDuration(200)
                                     .setInterpolator(DecelerateInterpolator())
                                     .rotation(180f)
@@ -340,6 +345,7 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
                     }
                 }
             }
+        }
 
         findViewById<Button>(R.id.postDoodle).setOnClickListener {
             if (!IntentUtil.checkAndRequestAllPermissions(
@@ -438,13 +444,10 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
 
         findViewById<Button>(R.id.postClose).setOnClickListener {
             KeyboardUtils.hideSoftInput(postContent!!)
+            buttonToggleGroup?.clearChecked()
             dismiss()
-//            dismissWith {
-//                val lp = keyboardHolder!!.layoutParams
-//                lp.height = 0
-//                keyboardHolder!!.layoutParams = lp
-//            }
         }
+
     }
 
     private fun compressAndPreviewImage(uri: Uri?) {
@@ -530,10 +533,16 @@ class PostPopup(private val caller: FragmentActivity, private val sharedVM: Shar
         email = findViewById<TextView>(R.id.formEmail).text.toString()
         title = findViewById<TextView>(R.id.formTitle).text.toString()
         content = postContent!!.text.toString()
-        if (content.isBlank() && imageFile == null) {
-            Toast.makeText(caller, R.string.need_content_to_post, Toast.LENGTH_SHORT).show()
-            return
+        if (content.isBlank()) {
+            if (imageFile != null) {
+                postContent!!.setText("分享图片")
+                content = "分享图片"
+            } else {
+                Toast.makeText(caller, R.string.need_content_to_post, Toast.LENGTH_SHORT).show()
+                return
+            }
         }
+
 
         selectedCookie?.let { cookieHash = it.getApiHeaderCookieHash() }
 

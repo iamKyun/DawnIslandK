@@ -18,10 +18,8 @@
 package com.laotoua.dawnislandk.screens.subscriptions
 
 import android.os.Bundle
-import android.os.Handler
 import android.view.*
 import android.widget.ImageView
-import android.widget.Toast
 import androidx.core.text.isDigitsOnly
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Observer
@@ -44,6 +42,7 @@ import com.laotoua.dawnislandk.data.local.entity.FeedAndPost
 import com.laotoua.dawnislandk.databinding.FragmentSubscriptionFeedBinding
 import com.laotoua.dawnislandk.screens.adapters.*
 import com.laotoua.dawnislandk.screens.posts.PostCardFactory
+import com.laotoua.dawnislandk.screens.util.Layout.toast
 import com.laotoua.dawnislandk.screens.util.Layout.updateHeaderAndFooter
 import com.laotoua.dawnislandk.screens.widgets.BaseNavFragment
 import com.laotoua.dawnislandk.screens.widgets.popups.ImageViewerPopup
@@ -68,11 +67,8 @@ class FeedsFragment : BaseNavFragment() {
 
     private val viewModel: FeedsViewModel by viewModels { viewModelFactory }
 
-    private var mHandler: Handler? = null
-    private val mDelayedLoad = Runnable {
-        viewModel.getNextPage()
-    }
-    private var delayedLoading = false
+    private var viewCaching = false
+    private var refreshing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,8 +102,10 @@ class FeedsFragment : BaseNavFragment() {
                         dialog.setActionButtonEnabled(WhichButton.POSITIVE, isValid)
                     }
                     positiveButton(R.string.submit) {
+                        refreshing = true
                         viewModel.jumpToPage(page)
                     }
+                    negativeButton(R.string.cancel)
                 }
                 return true
             }
@@ -151,82 +149,58 @@ class FeedsFragment : BaseNavFragment() {
                 })
             }
         }
+
+        viewModel.delFeedResponse.observe(viewLifecycleOwner, Observer<SingleLiveEvent<String>> {
+            it.getContentIfNotHandled()?.let { message ->
+                toast(message)
+            }
+        })
+        viewModel.loadingStatus.observe(viewLifecycleOwner, Observer<SingleLiveEvent<EventPayload<Nothing>>> {
+            if (mAdapter == null || binding == null) return@Observer
+            it.getContentIfNotHandled()?.run {
+                updateHeaderAndFooter(binding!!.srlAndRv.refreshLayout, mAdapter!!, this)
+            }
+        })
+        viewModel.feeds.observe(viewLifecycleOwner, Observer<List<FeedAndPost>> { list ->
+            if (mAdapter == null) return@Observer
+            if (list.isEmpty()) {
+                if (viewModel.lastJumpPage > 0) {
+                    toast(getString(R.string.no_feed_on_page, viewModel.lastJumpPage))
+                }
+                mAdapter!!.setDiffNewData(null)
+                return@Observer
+            }
+
+            val data: MutableList<Any> = ArrayList()
+            var lastPage: Int? = null
+            list.map {
+                if (it.feed.page != lastPage) {
+                    data.add("页数: ${it.feed.page}")
+                    lastPage = it.feed.page
+                }
+                if (it.post != null) {
+                    data.add(it)
+                }
+            }
+            if (refreshing) {
+                mAdapter!!.setList(data)
+                binding?.srlAndRv?.recyclerView?.scrollToPosition(0)
+            }
+            else mAdapter!!.setDiffNewData(data)
+            refreshing = false
+            Timber.i("${this.javaClass.simpleName} Adapter will have ${list.size} feeds")
+        })
+        if (viewModel.feeds.value.isNullOrEmpty()) {
+            binding?.srlAndRv?.refreshLayout?.autoRefresh(Constants.ACTION_NOTIFY, false)
+        }
+
+        viewCaching = false
         return binding!!.root
-    }
-
-    private val delFeedResponseObs = Observer<SingleLiveEvent<String>> {
-        it.getContentIfNotHandled()?.let { message ->
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private val loadingObs = Observer<SingleLiveEvent<EventPayload<Nothing>>> {
-        if (mAdapter == null || binding == null) return@Observer
-        it.getContentIfNotHandled()?.run {
-            updateHeaderAndFooter(binding!!.srlAndRv.refreshLayout, mAdapter!!, this)
-            delayedLoading = false
-        }
-    }
-
-    private val feedsObs = Observer<List<FeedAndPost>> { list ->
-        if (mAdapter == null) return@Observer
-        if (list.isEmpty()) {
-            if (viewModel.lastJumpPage > 0) {
-                Toast.makeText(
-                    context,
-                    requireContext().getString(
-                        R.string.no_feed_on_page,
-                        viewModel.lastJumpPage
-                    ),
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-            mAdapter!!.setDiffNewData(null)
-            return@Observer
-        }
-
-        val data: MutableList<Any> = ArrayList()
-        var lastPage: Int? = null
-        list.map {
-            if (it.feed.page != lastPage) {
-                data.add("页数: ${it.feed.page}")
-                lastPage = it.feed.page
-            }
-            if (it.post != null) {
-                data.add(it)
-            }
-        }
-        mAdapter!!.setDiffNewData(data)
-        Timber.i("${this.javaClass.simpleName} Adapter will have ${list.size} feeds")
-    }
-
-    override fun onResume() {
-        super.onResume()
-
-        if (viewModel.feeds.value.isNullOrEmpty() && !delayedLoading) {
-            binding?.srlAndRv?.refreshLayout?.autoRefresh(Constants.ACTION_NOTHING, false)
-            // give sometime to skip load if bypassing this fragment
-            mHandler = mHandler ?: Handler()
-            delayedLoading = mHandler!!.postDelayed(mDelayedLoad, 500)
-        }
-
-        viewModel.delFeedResponse.observe(viewLifecycleOwner, delFeedResponseObs)
-        viewModel.loadingStatus.observe(viewLifecycleOwner, loadingObs)
-        viewModel.feeds.observe(viewLifecycleOwner, feedsObs)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        mHandler?.removeCallbacks(mDelayedLoad)
-        mHandler = null
-        viewModel.delFeedResponse.removeObserver(delFeedResponseObs)
-        viewModel.loadingStatus.removeObserver(loadingObs)
-        viewModel.feeds.removeObserver(feedsObs)
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        if (!DawnApp.applicationDataStore.getViewCaching()) {
+        if (!viewCaching) {
             mAdapter = null
             binding = null
         }
@@ -268,6 +242,7 @@ class FeedsFragment : BaseNavFragment() {
             data: FeedAndPost,
             position: Int
         ) {
+            viewCaching = DawnApp.applicationDataStore.getViewCaching()
             val navAction =
                 MainNavDirections.actionGlobalCommentsFragment(data.feed.postId, data.post!!.fid)
             findNavController().navigate(navAction)

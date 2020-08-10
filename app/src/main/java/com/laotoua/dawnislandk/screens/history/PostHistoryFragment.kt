@@ -23,7 +23,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
-import android.widget.Toast
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Observer
 import androidx.navigation.fragment.findNavController
@@ -43,6 +42,7 @@ import com.laotoua.dawnislandk.databinding.FragmentHistoryPostBinding
 import com.laotoua.dawnislandk.screens.SharedViewModel
 import com.laotoua.dawnislandk.screens.adapters.*
 import com.laotoua.dawnislandk.screens.posts.PostCardFactory
+import com.laotoua.dawnislandk.screens.util.Layout.toast
 import com.laotoua.dawnislandk.screens.widgets.BaseNavFragment
 import com.laotoua.dawnislandk.screens.widgets.SectionHeader
 import com.laotoua.dawnislandk.screens.widgets.popups.ImageViewerPopup
@@ -59,6 +59,7 @@ class PostHistoryFragment : BaseNavFragment() {
 
     private var binding: FragmentHistoryPostBinding? = null
     private var mAdapter: QuickMultiBinder? = null
+    private var viewCaching = false
 
     private val viewModel: PostHistoryViewModel by viewModels { viewModelFactory }
 
@@ -101,6 +102,7 @@ class PostHistoryFragment : BaseNavFragment() {
             binding!!.startDate.text = ReadableTime.getDateString(startDate.time)
             binding!!.endDate.text = ReadableTime.getDateString(endDate.time)
             binding!!.startDate.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 MaterialDialog(requireContext()).show {
                     datePicker(currentDate = startDate) { _, date ->
                         setStartDate(date)
@@ -109,6 +111,7 @@ class PostHistoryFragment : BaseNavFragment() {
             }
 
             binding!!.endDate.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 MaterialDialog(requireContext()).show {
                     datePicker(currentDate = endDate) { _, date ->
                         setEndDate(date)
@@ -117,35 +120,25 @@ class PostHistoryFragment : BaseNavFragment() {
             }
 
             binding!!.confirmDate.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 if (startDate.before(endDate)) {
                     viewModel.searchByDate()
                 } else {
-                    Toast.makeText(context, R.string.data_range_selection_error, Toast.LENGTH_SHORT)
-                        .show()
+                    toast(R.string.data_range_selection_error)
                 }
             }
         }
+        viewModel.postHistoryList.observe(viewLifecycleOwner, Observer<List<PostHistory>> { list ->
+            if (mAdapter == null || binding == null || activity == null || !isAdded) return@Observer
+            if (list.isEmpty()) {
+                if (!mAdapter!!.hasEmptyView()) mAdapter!!.setDefaultEmptyView()
+                mAdapter!!.setDiffNewData(null)
+                return@Observer
+            }
+            displayList(list)
+        })
+        viewCaching = false
         return binding!!.root
-    }
-
-    private val listObs = Observer<List<PostHistory>> { list ->
-        if (mAdapter == null || binding == null) return@Observer
-        if (list.isEmpty()) {
-            if (!mAdapter!!.hasEmptyView()) mAdapter!!.setDefaultEmptyView()
-            mAdapter!!.setDiffNewData(null)
-            return@Observer
-        }
-        displayList(list)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        viewModel.postHistoryList.observe(viewLifecycleOwner, listObs)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        viewModel.postHistoryList.removeObserver(listObs)
     }
 
     private fun setStartDate(date: Calendar) {
@@ -253,6 +246,7 @@ class PostHistoryFragment : BaseNavFragment() {
             data: PostHistory,
             position: Int
         ) {
+            if (activity == null || !isAdded) return
             if (view.id == R.id.attachedImage) {
                 val viewerPopup = ImageViewerPopup(context)
                 viewerPopup.setSingleSrcView(view as ImageView?, data)
@@ -263,6 +257,8 @@ class PostHistoryFragment : BaseNavFragment() {
         }
 
         override fun onClick(holder: BaseViewHolder, view: View, data: PostHistory, position: Int) {
+            if (activity == null || !isAdded) return
+            viewCaching = DawnApp.applicationDataStore.getViewCaching()
             if (data.newPost) {
                 val navAction =
                     MainNavDirections.actionGlobalCommentsFragment(data.id, data.postTargetFid)
@@ -276,7 +272,7 @@ class PostHistoryFragment : BaseNavFragment() {
         }
     }
 
-    private class SectionHeaderBinder :
+    inner class SectionHeaderBinder :
         QuickItemBinder<SectionHeader>() {
         override fun convert(holder: BaseViewHolder, data: SectionHeader) {
             holder.setText(R.id.text, data.text)
@@ -293,6 +289,7 @@ class PostHistoryFragment : BaseNavFragment() {
             data: SectionHeader,
             position: Int
         ) {
+            if (activity == null || !isAdded) return
             if (data.clickListener == null) return
             data.clickListener.onClick(view)
             data.isExpanded = !data.isExpanded
@@ -332,7 +329,6 @@ class PostHistoryFragment : BaseNavFragment() {
         }
     }
 
-
     inner class SectionHeaderDiffer : DiffUtil.ItemCallback<SectionHeader>() {
         override fun areItemsTheSame(oldItem: SectionHeader, newItem: SectionHeader): Boolean {
             return oldItem.text == newItem.text
@@ -355,7 +351,7 @@ class PostHistoryFragment : BaseNavFragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        if (!DawnApp.applicationDataStore.getViewCaching()) {
+        if (!viewCaching) {
             mAdapter = null
             binding = null
         }

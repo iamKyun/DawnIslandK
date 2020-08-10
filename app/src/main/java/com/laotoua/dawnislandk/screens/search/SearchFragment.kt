@@ -23,11 +23,11 @@ import android.view.*
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.text.toSpannable
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Observer
 import androidx.navigation.fragment.findNavController
+import androidx.navigation.fragment.navArgs
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.afollestad.materialdialogs.MaterialDialog
@@ -41,34 +41,31 @@ import com.laotoua.dawnislandk.MainNavDirections
 import com.laotoua.dawnislandk.R
 import com.laotoua.dawnislandk.data.remote.SearchResult
 import com.laotoua.dawnislandk.databinding.FragmentSearchBinding
-import com.laotoua.dawnislandk.screens.MainActivity
 import com.laotoua.dawnislandk.screens.adapters.*
 import com.laotoua.dawnislandk.screens.posts.PostCardFactory
+import com.laotoua.dawnislandk.screens.util.Layout.toast
 import com.laotoua.dawnislandk.screens.util.Layout.updateHeaderAndFooter
 import com.laotoua.dawnislandk.screens.widgets.BaseNavFragment
 import com.laotoua.dawnislandk.screens.widgets.popups.ImageViewerPopup
 import com.laotoua.dawnislandk.util.EventPayload
 import com.laotoua.dawnislandk.util.SingleLiveEvent
 import com.lxj.xpopup.XPopup
+import me.dkzwm.widget.srl.RefreshingListenerAdapter
 import timber.log.Timber
 import java.util.*
 
 
 class SearchFragment : BaseNavFragment() {
 
-    companion object {
-        fun newInstance() = SearchFragment()
-    }
+    private val args: SearchFragmentArgs by navArgs()
 
     private val viewModel: SearchViewModel by viewModels { viewModelFactory }
-    private var _binding: FragmentSearchBinding? = null
-    private val binding: FragmentSearchBinding get() = _binding!!
-
-    private var _mAdapter: QuickMultiBinder? = null
-    private val mAdapter: QuickMultiBinder get() = _mAdapter!!
-
+    private var binding: FragmentSearchBinding? = null
+    private var mAdapter: QuickMultiBinder? = null
     private var pageCounter: TextView? = null
 
+    private var viewCaching = false
+    private var refreshing = false
     private var currentPage = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,8 +87,7 @@ class SearchFragment : BaseNavFragment() {
         return when (item.itemId) {
             R.id.search -> {
                 if (DawnApp.applicationDataStore.firstCookieHash == null) {
-                    Toast.makeText(context, R.string.need_cookie_to_search, Toast.LENGTH_SHORT)
-                        .show()
+                    toast(R.string.need_cookie_to_search)
                     return true
                 }
 
@@ -101,15 +97,12 @@ class SearchFragment : BaseNavFragment() {
                         findViewById<Button>(R.id.search).setOnClickListener {
                             val query = findViewById<TextView>(R.id.searchInputText).text.toString()
                             if (query.isNotBlank() && query != viewModel.query) {
+                                refreshing = true
                                 viewModel.search(query)
                                 currentPage = 0
                                 dismiss()
                             } else {
-                                Toast.makeText(
-                                    context,
-                                    R.string.please_input_valid_text,
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                toast(R.string.please_input_valid_text)
                             }
                         }
 
@@ -117,17 +110,13 @@ class SearchFragment : BaseNavFragment() {
                             val threadId = findViewById<TextView>(R.id.searchInputText).text
                                 .filter { it.isDigit() }.toString()
                             if (threadId.isNotEmpty()) {
-                                // Does not have fid here. fid will be generated when data comes back in reply
                                 dismiss()
-                                val navAction =
-                                    MainNavDirections.actionGlobalCommentsFragment(threadId, "")
+                                viewCaching = DawnApp.applicationDataStore.getViewCaching()
+                                // Does not have fid here. fid will be generated when data comes back in reply
+                                val navAction = MainNavDirections.actionGlobalCommentsFragment(threadId, "")
                                 findNavController().navigate(navAction)
                             } else {
-                                Toast.makeText(
-                                    context,
-                                    R.string.please_input_valid_text,
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                toast(R.string.please_input_valid_text)
                             }
                         }
                     }
@@ -142,8 +131,8 @@ class SearchFragment : BaseNavFragment() {
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        if (_mAdapter == null) {
-            _mAdapter = QuickMultiBinder(sharedVM).apply {
+        if (mAdapter == null) {
+            mAdapter = QuickMultiBinder(sharedVM).apply {
                 addItemBinder(SimpleTextBinder())
                 addItemBinder(HitBinder().apply {
                     addChildClickViewIds(R.id.attachedImage)
@@ -154,86 +143,82 @@ class SearchFragment : BaseNavFragment() {
                 }
             }
         }
-        if (_binding != null) {
+        if (binding != null) {
             Timber.d("Fragment View Reusing!")
         } else {
             Timber.d("Fragment View Created")
-            _binding = FragmentSearchBinding.inflate(inflater, container, false)
-            binding.srlAndRv.recyclerView.apply {
+            binding = FragmentSearchBinding.inflate(inflater, container, false)
+            binding?.srlAndRv?.refreshLayout?.setOnRefreshListener(object :
+                RefreshingListenerAdapter() {
+                override fun onRefreshing() {
+                    binding?.srlAndRv?.refreshLayout?.refreshComplete(true)
+                }
+            })
+
+            binding?.srlAndRv?.recyclerView?.apply {
                 setHasFixedSize(true)
                 layoutManager = LinearLayoutManager(context)
                 adapter = mAdapter
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                        if (_binding == null) return
+                        if (activity == null || !isAdded || binding == null || mAdapter == null) return
                         val firstVisiblePos =
                             (layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
-                        if (firstVisiblePos > 0 && firstVisiblePos < mAdapter.data.lastIndex) {
-                            if (mAdapter.getItem(firstVisiblePos) is String) {
-                                updateCurrentPage(
-                                    (mAdapter.getItem(firstVisiblePos) as String).substringAfter(
-                                        ":"
-                                    ).trim().toInt()
-                                )
+                        if (firstVisiblePos > 0 && firstVisiblePos < mAdapter!!.data.lastIndex) {
+                            if (mAdapter!!.getItem(firstVisiblePos) is SearchResult.Hit) {
+                                updateCurrentPage((mAdapter!!.getItem(firstVisiblePos) as SearchResult.Hit).page)
                             }
                         }
                     }
                 })
             }
-
-            mAdapter.setDefaultEmptyView()
+            if (viewModel.query.isBlank()) viewModel.search(args.query)
         }
-        return binding.root
+
+        viewModel.loadingStatus.observe(viewLifecycleOwner, Observer<SingleLiveEvent<EventPayload<Nothing>>> {
+            if (binding == null || mAdapter == null) return@Observer
+            it.getContentIfNotHandled()?.run {
+                updateHeaderAndFooter(binding!!.srlAndRv.refreshLayout, mAdapter!!, this)
+            }
+        })
+
+
+        viewModel.searchResult.observe(viewLifecycleOwner, Observer<List<SearchResult>> { list ->
+            if (mAdapter == null) return@Observer
+            if (list.isEmpty()) {
+                mAdapter!!.setDiffNewData(null)
+                hideCurrentPageText()
+                return@Observer
+            }
+            if (currentPage == 0) updateCurrentPage(1)
+            val data: MutableList<Any> = ArrayList()
+            list.map {
+                data.add("搜索: ${list.firstOrNull()?.query} 页数: ${it.page}")
+                data.addAll(it.hits)
+            }
+            if (refreshing) {
+                mAdapter!!.setList(data)
+                binding?.srlAndRv?.recyclerView?.scrollToPosition(0)
+            } else mAdapter!!.setDiffNewData(data)
+            refreshing = false
+        })
+
+        viewCaching = false
+        return binding!!.root
     }
 
-    private val searchResultObs = Observer<List<SearchResult>> { list ->
-        if (_mAdapter == null) return@Observer
-        if (list.isEmpty()) {
-            mAdapter.setDiffNewData(null)
-            hideCurrentPageText()
-            return@Observer
-        }
-        if (currentPage == 0) updateCurrentPage(1)
-        val data: MutableList<Any> = ArrayList()
-        data.add("搜索： ${list.firstOrNull()?.query}")
-        list.map {
-            data.add("结果页数: ${it.page}")
-            data.addAll(it.hits)
-        }
-        mAdapter.setDiffNewData(data)
-    }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        if (!DawnApp.applicationDataStore.getViewCaching()) {
-            _mAdapter = null
-            _binding = null
+        if (!viewCaching) {
+            mAdapter = null
+            binding = null
         }
-        Timber.d("Fragment View Destroyed ${_binding == null}")
-    }
-
-    private val loadingStatusObs = Observer<SingleLiveEvent<EventPayload<Nothing>>> {
-        if (_binding == null || _mAdapter == null) return@Observer
-        it.getContentIfNotHandled()?.run {
-            updateHeaderAndFooter(binding.srlAndRv.refreshLayout, mAdapter, this)
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        (requireActivity() as MainActivity).setToolbarTitle(R.string.search)
-        viewModel.searchResult.observe(viewLifecycleOwner, searchResultObs)
-        viewModel.loadingStatus.observe(viewLifecycleOwner, loadingStatusObs)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        viewModel.searchResult.removeObserver(searchResultObs)
-        viewModel.loadingStatus.removeObserver(loadingStatusObs)
+        Timber.d("Fragment View Destroyed ${binding == null}")
     }
 
     private fun updateCurrentPage(page: Int) {
-        if (page != currentPage) {
+        if (page != currentPage || pageCounter?.text?.isBlank() == true) {
             pageCounter?.text =
                 (page.toString() + " / " + viewModel.maxPage.toString()).toSpannable()
                     .apply { setSpan(UnderlineSpan(), 0, length, 0) }
@@ -276,6 +261,7 @@ class SearchFragment : BaseNavFragment() {
             data: SearchResult.Hit,
             position: Int
         ) {
+            viewCaching = DawnApp.applicationDataStore.getViewCaching()
             val navAction = MainNavDirections.actionGlobalCommentsFragment(data.getPostId(), "")
             findNavController().navigate(navAction)
         }

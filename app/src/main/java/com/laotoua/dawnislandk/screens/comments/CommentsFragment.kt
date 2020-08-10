@@ -28,7 +28,6 @@ import android.os.SystemClock
 import android.text.style.UnderlineSpan
 import android.view.*
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.content.ContextCompat.getSystemService
 import androidx.core.text.toSpannable
 import androidx.core.view.isVisible
@@ -56,6 +55,7 @@ import com.laotoua.dawnislandk.databinding.FragmentCommentBinding
 import com.laotoua.dawnislandk.screens.MainActivity
 import com.laotoua.dawnislandk.screens.SharedViewModel
 import com.laotoua.dawnislandk.screens.adapters.QuickAdapter
+import com.laotoua.dawnislandk.screens.util.Layout.toast
 import com.laotoua.dawnislandk.screens.util.Layout.updateHeaderAndFooter
 import com.laotoua.dawnislandk.screens.widgets.LinkifyTextView
 import com.laotoua.dawnislandk.screens.widgets.popups.ImageViewerPopup
@@ -88,6 +88,8 @@ class CommentsFragment : DaggerFragment() {
     private val sharedVM: SharedViewModel by activityViewModels { viewModelFactory }
 
     private var mAdapter: QuickAdapter<Comment>? = null
+    private var viewCaching = false
+    private var refreshing = false
 
     // last visible item indicates the current page, uses for remembering last read page
     private var currentPage = 0
@@ -133,10 +135,10 @@ class CommentsFragment : DaggerFragment() {
                 filterActivated = filterActivated.not()
                 if (!filterActivated) {
                     viewModel.clearFilter()
-                    Toast.makeText(context, R.string.comment_filter_off, Toast.LENGTH_SHORT).show()
+                    toast(R.string.comment_filter_off)
                 } else {
                     viewModel.onlyPo()
-                    Toast.makeText(context, R.string.comment_filter_on, Toast.LENGTH_SHORT).show()
+                    toast(R.string.comment_filter_on)
                 }
                 (binding?.srlAndRv?.recyclerView?.layoutManager as LinearLayoutManager?)?.run {
                     val startPos = findFirstVisibleItemPosition()
@@ -162,6 +164,7 @@ class CommentsFragment : DaggerFragment() {
                 })
 
                 setOnItemClickListener { _, _, pos ->
+                    if (activity == null || !isAdded) return@setOnItemClickListener
                     toggleCommentMenuOnPos(pos)
                 }
 
@@ -170,11 +173,13 @@ class CommentsFragment : DaggerFragment() {
                     R.id.expandSummary,
                     R.id.comment,
                     R.id.content,
-                    R.id.copy,
+                    R.id.copyContent,
+                    R.id.copyId,
                     R.id.report
                 )
 
                 setOnItemChildClickListener { _, view, position ->
+                    if (activity == null || !isAdded) return@setOnItemChildClickListener
                     when (view.id) {
                         R.id.attachedImage -> {
                             val pos = imagesList.indexOf(getItem(position))
@@ -196,9 +201,14 @@ class CommentsFragment : DaggerFragment() {
                                 quote = content
                             )
                         }
-                        R.id.copy -> {
+                        R.id.copyContent -> {
                             mAdapter?.getViewByPosition(position, R.id.content)?.let {
-                                copyText("评论", (it as TextView).text.toString())
+                                copyText("内容", (it as TextView).text.toString())
+                            }
+                        }
+                        R.id.copyId -> {
+                            mAdapter?.getViewByPosition(position, R.id.refId)?.let {
+                                copyText("串号", ">>${(it as TextView).text}")
                             }
                         }
                         R.id.report -> {
@@ -271,7 +281,7 @@ class CommentsFragment : DaggerFragment() {
                                 (binding!!.srlAndRv.recyclerView.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
                             )?.page == 1
                         ) {
-                            Toast.makeText(context, "没有上一页了。。。", Toast.LENGTH_SHORT).show()
+                            toast("没有上一页了。。。")
                             refreshComplete(true, 100L)
                         } else {
                             viewModel.getPreviousPage()
@@ -287,7 +297,7 @@ class CommentsFragment : DaggerFragment() {
                 setHasFixedSize(true)
                 addOnScrollListener(object : RecyclerView.OnScrollListener() {
                     override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                        if (binding == null) return
+                        if (activity == null || !isAdded || binding == null) return
                         if (dy > 0) {
                             hideMenu()
                         } else if (dy < 0) {
@@ -302,13 +312,14 @@ class CommentsFragment : DaggerFragment() {
             }
 
             binding!!.copyAndShare.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 val items = listOf(
                     BasicGridItem(R.drawable.ic_share_black_48dp, "分享串"),
                     BasicGridItem(R.drawable.ic_public_black_48dp, "复制串地址"),
                     BasicGridItem(R.drawable.ic_content_copy_black_48dp, "复制串号")
                 )
                 MaterialDialog(requireContext(), BottomSheet(LayoutMode.WRAP_CONTENT)).show {
-                    title(R.string.copy_and_share)
+                    title(R.string.share)
                     gridItems(items) { _, index, _ ->
                         when (index) {
                             0 -> {
@@ -334,13 +345,15 @@ class CommentsFragment : DaggerFragment() {
                                 "${DawnConstants.nmbHost}/t/${viewModel.currentPostId}"
                             )
                             2 -> copyText("串号", ">>No.${viewModel.currentPostId}")
-                            else -> {}
+                            else -> {
+                            }
                         }
                     }
                 }
             }
 
             binding!!.post.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 postPopup.setupAndShow(
                     viewModel.currentPostId,
                     viewModel.currentPostFid,
@@ -349,7 +362,7 @@ class CommentsFragment : DaggerFragment() {
             }
 
             binding!!.jump.setOnClickListener {
-                if (binding == null || mAdapter == null) return@setOnClickListener
+                if (binding == null || mAdapter == null || activity == null || !isAdded) return@setOnClickListener
                 if (binding!!.srlAndRv.refreshLayout.isRefreshing || mAdapter?.loadMoreModule?.isLoading == true) {
                     Timber.d("Loading data...Holding on jump...")
                     return@setOnClickListener
@@ -371,7 +384,7 @@ class CommentsFragment : DaggerFragment() {
                                     Constants.ACTION_NOTHING,
                                     false
                                 )
-                                mAdapter?.setList(emptyList())
+                                refreshing = true
                                 Timber.i("Jumping to ${jumpPopup.targetPage}...")
                                 viewModel.jumpTo(jumpPopup.targetPage)
                             }
@@ -383,94 +396,90 @@ class CommentsFragment : DaggerFragment() {
             }
 
             binding!!.addFeed.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 viewModel.addFeed(viewModel.currentPostId)
             }
         }
+        subscribeUI()
+        viewCaching = false
         return binding!!.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
         viewModel.setPost(args.id, args.fid, args.targetPage)
         requireTitleUpdate = args.fid.isBlank()
         updateTitle()
     }
 
-    private val addFeedObs = Observer<SingleLiveEvent<String>> {
-        it.getContentIfNotHandled()?.let { message ->
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private val loadingStatusObs = Observer<SingleLiveEvent<EventPayload<Nothing>>> {
-        if (binding == null || mAdapter == null) return@Observer
-        it.getContentIfNotHandled()?.run {
-            updateHeaderAndFooter(binding!!.srlAndRv.refreshLayout, mAdapter!!, this)
-        }
-    }
-
-    private val commentsObs = Observer<MutableList<Comment>> {
-        if (mAdapter == null || it.isEmpty()) return@Observer
-        updateCurrentPage()
-        if (requireTitleUpdate) {
-            updateTitle()
-            requireTitleUpdate = false
-        }
-        mAdapter?.setDiffNewData(it.toMutableList())
-        updateCurrentlyAvailableImages(it)
-        mAdapter?.setPo(viewModel.po)
-        Timber.i("${this.javaClass.simpleName} Adapter will have ${mAdapter?.data?.size} comments")
-    }
-
-    private val successPostObs = Observer<SingleLiveEvent<Boolean>> { event ->
-        event.getContentIfNotHandled()?.let {
-            if (it && currentPage >= viewModel.maxPage - 1) {
-                mAdapter?.loadMoreModule?.loadMoreToLoading()
-            }
-        }
-    }
-
     private fun subscribeUI() {
-        viewModel.addFeedResponse.observe(viewLifecycleOwner, addFeedObs)
-        viewModel.loadingStatus.observe(viewLifecycleOwner, loadingStatusObs)
-        viewModel.comments.observe(viewLifecycleOwner, commentsObs)
-        sharedVM.savePostStatus.observe(viewLifecycleOwner, successPostObs)
-    }
+        viewModel.addFeedResponse.observe(viewLifecycleOwner, Observer<SingleLiveEvent<String>> {
+            it.getContentIfNotHandled()?.let { message ->
+                toast(message)
+            }
+        })
 
-    private fun unsubscribeUI() {
-        viewModel.addFeedResponse.removeObserver(addFeedObs)
-        viewModel.loadingStatus.removeObserver(loadingStatusObs)
-        viewModel.comments.removeObserver(commentsObs)
-        sharedVM.savePostStatus.removeObserver(successPostObs)
+        viewModel.loadingStatus.observe(
+            viewLifecycleOwner,
+            Observer<SingleLiveEvent<EventPayload<Nothing>>> {
+                if (binding == null || mAdapter == null) return@Observer
+                it.getContentIfNotHandled()?.run {
+                    updateHeaderAndFooter(binding!!.srlAndRv.refreshLayout, mAdapter!!, this)
+                }
+            })
+
+        viewModel.comments.observe(viewLifecycleOwner, Observer<MutableList<Comment>> {
+            if (mAdapter == null || it.isEmpty()) return@Observer
+            updateCurrentPage()
+            if (requireTitleUpdate) {
+                updateTitle()
+                requireTitleUpdate = false
+            }
+            if (refreshing) {
+                mAdapter?.setList(it.toMutableList())
+                binding?.srlAndRv?.recyclerView?.scrollToPosition(0)
+            }
+            else mAdapter?.setDiffNewData(it.toMutableList())
+            refreshing = false
+            updateCurrentlyAvailableImages(it)
+            mAdapter?.setPo(viewModel.po)
+            Timber.i("${this.javaClass.simpleName} Adapter will have ${mAdapter?.data?.size} comments")
+        })
+        sharedVM.savePostStatus.observe(
+            viewLifecycleOwner,
+            Observer<SingleLiveEvent<Boolean>> { event ->
+                event.getContentIfNotHandled()?.let {
+                    if (it && currentPage >= viewModel.maxPage - 1) {
+                        mAdapter?.loadMoreModule?.loadMoreToLoading()
+                    }
+                }
+            })
     }
 
     override fun onPause() {
         super.onPause()
-        unsubscribeUI()
+        binding?.srlAndRv?.recyclerView?.stopScroll()
     }
 
     override fun onResume() {
         super.onResume()
-        subscribeUI()
 
-        (requireActivity() as MainActivity).run {
-            setToolbarClickListener {
-                binding?.srlAndRv?.recyclerView?.layoutManager?.scrollToPosition(0)
-                showMenu()
+        if (activity != null && isAdded) {
+            (requireActivity() as MainActivity).run {
+                setToolbarClickListener {
+                    binding?.srlAndRv?.recyclerView?.layoutManager?.scrollToPosition(0)
+                    if (binding != null) showMenu()
+                }
+                hideNav()
             }
-            hideNav()
         }
     }
+
 
     private fun copyText(label: String, text: String) {
         getSystemService(requireContext(), ClipboardManager::class.java)
             ?.setPrimaryClip(ClipData.newPlainText(label, text))
-        Toast.makeText(
-            context,
-            resources.getString(R.string.content_copied, label),
-            Toast.LENGTH_SHORT
-        ).show()
+        toast(resources.getString(R.string.content_copied, label))
     }
 
     private fun getCurrentPage(): Int {
@@ -485,7 +494,7 @@ class CommentsFragment : DaggerFragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         dismissAllQuotes()
-        if (!DawnApp.applicationDataStore.getViewCaching()) {
+        if (!viewCaching) {
             mAdapter = null
             binding = null
         }
@@ -516,7 +525,7 @@ class CommentsFragment : DaggerFragment() {
                 override fun onAnimationStart(animation: Animator?) {}
             })
         }
-        currentAnimatorSet!!.start()
+        currentAnimatorSet?.start()
     }
 
     fun showMenu() {
@@ -541,7 +550,7 @@ class CommentsFragment : DaggerFragment() {
                 override fun onAnimationStart(animation: Animator?) {}
             })
         }
-        currentAnimatorSet!!.start()
+        currentAnimatorSet?.start()
     }
 
     private fun updateTitle() {
@@ -555,11 +564,12 @@ class CommentsFragment : DaggerFragment() {
     private fun updateCurrentPage() {
         if (mAdapter == null || binding == null) return
         val page = getCurrentPage()
-        if (page != currentPage || pageCounter?.text?.isBlank() == true) {
+        if (page != currentPage ) {
             viewModel.saveReadingProgress(page)
-            pageCounter?.text =
-                (page.toString() + " / " + viewModel.maxPage.toString()).toSpannable()
-                    .apply { setSpan(UnderlineSpan(), 0, length, 0) }
+        }
+        val newText = "$page / ${viewModel.maxPage}"
+        if (pageCounter?.text != newText){
+            pageCounter?.text = newText.toSpannable().apply { setSpan(UnderlineSpan(), 0, length, 0) }
         }
         currentPage = page
     }
@@ -631,6 +641,8 @@ class CommentsFragment : DaggerFragment() {
         dismissAllQuotes()
         lifecycleScope.launch {
             delay(100L)
+            if (activity == null || !isAdded) return@launch
+            viewCaching = DawnApp.applicationDataStore.getViewCaching()
             val navAction = MainNavDirections.actionGlobalCommentsFragment(id, "")
             findNavController().navigate(navAction)
         }

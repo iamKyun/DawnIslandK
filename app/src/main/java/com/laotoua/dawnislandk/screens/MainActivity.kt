@@ -28,11 +28,14 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewPropertyAnimator
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.viewModels
+import androidx.core.net.toUri
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavDestination
 import androidx.navigation.findNavController
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
@@ -129,6 +132,7 @@ class MainActivity : DaggerAppCompatActivity() {
             setSubtitle(R.string.toolbar_subtitle)
         }
         immersiveToolbarInitialization()
+        customToolbarBackground()
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
@@ -142,13 +146,11 @@ class MainActivity : DaggerAppCompatActivity() {
                 Toast.makeText(this, it.message, Toast.LENGTH_LONG).show()
                 return@Observer
             }
-            val list = it.data
-            if (list.isNullOrEmpty()) return@Observer
-            forumDrawer.setData(list)
-            sharedVM.setForumMappings(list)
-            // TODO: set default forum
-            if (sharedVM.selectedForumId.value == null) sharedVM.setForumId(list.first().forums.first().id)
-            Timber.i("Loaded ${list.size} communities to Adapter")
+            if (it.data.isNullOrEmpty()) return@Observer
+            forumDrawer.setData(it.data)
+            sharedVM.setForumMappings(it.data)
+            if (sharedVM.selectedForumId.value == null) sharedVM.setForumId(applicationDataStore.getDefaultForumId())
+            Timber.i("Loaded ${it.data.size} communities to Adapter")
         })
 
         sharedVM.reedPictureUrl.observe(this, Observer<String> {
@@ -218,8 +220,11 @@ class MainActivity : DaggerAppCompatActivity() {
                         startActivity(intent)
                     }
                 }
-                negativeButton(R.string.download_from_google_play){
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.laotoua.dawnislandk"))
+                negativeButton(R.string.download_from_google_play) {
+                    val intent = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=com.laotoua.dawnislandk")
+                    )
                     if (intent.resolveActivity(packageManager) != null) {
                         startActivity(intent)
                     }
@@ -255,12 +260,13 @@ class MainActivity : DaggerAppCompatActivity() {
         }
 
         // first time app entry
-        applicationDataStore.firstTimeUse.let {
-            if (!it) {
+        applicationDataStore.getFirstTimeUse().let {
+            if (it) {
                 if (this.isFinishing) return@let
                 MaterialDialog(this).show {
                     title(res = R.string.announcement)
                     checkBoxPrompt(R.string.acknowledge) {}
+                    cancelOnTouchOutside(false)
                     message(R.string.entry_message)
                     positiveButton(R.string.close) {
                         if (isCheckPromptChecked()) {
@@ -278,9 +284,7 @@ class MainActivity : DaggerAppCompatActivity() {
             val navController = navHostFragment.navController
             navController.addOnDestinationChangedListener { _, destination, _ ->
                 currentFragmentId = destination.id
-                if (currentFragmentId == R.id.postsFragment){
-                    sharedVM.selectedForumId.value?.let { setToolbarTitle(sharedVM.getForumDisplayName(it))}
-                }
+                updateTitleAndBottomNav(destination)
             }
             binding.bottomNavBar.setOnNavigationItemReselectedListener { item: MenuItem ->
                 if (item.itemId == R.id.postsFragment) showDrawer()
@@ -291,7 +295,6 @@ class MainActivity : DaggerAppCompatActivity() {
                 setOf(
                     R.id.postsFragment,
                     R.id.subscriptionPagerFragment,
-                    R.id.searchFragment,
                     R.id.historyPagerFragment,
                     R.id.profileFragment
                 ),
@@ -381,20 +384,24 @@ class MainActivity : DaggerAppCompatActivity() {
         )
     }
 
-    private var toolbarAnim:Animator? = null
+    private var oldTitle = ""
+    private var toolbarAnim: Animator? = null
     fun setToolbarTitle(newTitle: String) {
-        val oldTitle = binding.toolbar.title.toString()
         if (oldTitle == newTitle) return
         toolbarAnim?.cancel()
         val animCharCount = max(oldTitle.length, newTitle.length)
-        toolbarAnim = ValueAnimator.ofObject(StringEvaluator(animCharCount), binding.toolbar.title, newTitle).apply {
-            duration = animCharCount.toLong() * 60
-            start()
+        toolbarAnim = ValueAnimator.ofObject(
+            ToolbarTitleEvaluator(animCharCount),
+            StringBuilder(oldTitle),
+            StringBuilder(newTitle)
+        ).apply {
+            duration = animCharCount.toLong() * 80
             addUpdateListener {
-                binding.toolbar.title = it.animatedValue as String
+                binding.toolbar.title = it.animatedValue.toString()
                 binding.toolbar.invalidate()
             }
         }
+        oldTitle = newTitle
         toolbarAnim?.start()
     }
 
@@ -403,15 +410,89 @@ class MainActivity : DaggerAppCompatActivity() {
         setToolbarTitle(text)
     }
 
-    private class StringEvaluator(private val animCharCount: Int) : TypeEvaluator<String> {
-        override fun evaluate(fraction: Float, startValue: String, endValue: String): String {
+    private class ToolbarTitleEvaluator(private val animCharCount: Int) : TypeEvaluator<StringBuilder> {
+        override fun evaluate(
+            fraction: Float,
+            startValue: StringBuilder,
+            endValue: StringBuilder
+        ): StringBuilder {
             val ind = (fraction * animCharCount).toInt()
-            val left = endValue.substring(0, ind.coerceAtMost(endValue.length))
-            val right =
-                if (ind > startValue.length) " "
-                else startValue.substring(ind, startValue.length)
-            return left + right
+            for (i in 0 .. ind) {
+                val newChar = if (i >= endValue.length) ' ' else endValue[i]
+                if (i < startValue.length) startValue.setCharAt(i, newChar)
+                else startValue.append(newChar)
+            }
+            return startValue
         }
     }
 
+    private fun updateTitleAndBottomNav(destination: NavDestination) {
+        return when (destination.id) {
+            R.id.postsFragment -> {
+                sharedVM.selectedForumId.value.let {
+                    if (it != null) setToolbarTitle(sharedVM.getForumDisplayName(it))
+                }
+                showNav()
+            }
+            R.id.historyPagerFragment, R.id.subscriptionPagerFragment -> {
+                showNav()
+            }
+            R.id.searchFragment -> {
+                setToolbarTitle(R.string.search)
+                showNav()
+            }
+            R.id.commentsFragment -> {
+                hideNav()
+            }
+
+            R.id.aboutFragment -> {
+                setToolbarTitle(R.string.about)
+                hideNav()
+            }
+            R.id.commonForumsFragment -> {
+                setToolbarTitle(R.string.common_forum_setting)
+                hideNav()
+            }
+            R.id.commonPostsFragment -> {
+                setToolbarTitle(R.string.common_posts_setting)
+                hideNav()
+            }
+            R.id.customSettingFragment -> {
+                setToolbarTitle(R.string.custom_settings)
+                hideNav()
+            }
+            R.id.displaySettingFragment -> {
+                setToolbarTitle(R.string.display_settings)
+                hideNav()
+            }
+            R.id.generalSettingFragment -> {
+                setToolbarTitle(R.string.general_settings)
+                hideNav()
+            }
+            R.id.profileFragment -> {
+                setToolbarTitle(R.string.my_profile)
+                showNav()
+            }
+            R.id.sizeCustomizationFragment -> {
+                setToolbarTitle(R.string.layout_customization)
+                hideNav()
+            }
+            else -> {
+                Timber.e("Unhandled destination navigation $destination")
+            }
+        }
+    }
+
+
+    private fun customToolbarBackground() {
+        if (applicationDataStore.getCustomToolbarImageStatus()) {
+            try {
+                val path = applicationDataStore.getCustomToolbarImagePath().toUri()
+                binding.imageView.setImageURI(path)
+                binding.imageView.scaleType = ImageView.ScaleType.CENTER_CROP
+            } catch (e:Exception){
+                Toast.makeText(this, R.string.toolbar_customization_error, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 }

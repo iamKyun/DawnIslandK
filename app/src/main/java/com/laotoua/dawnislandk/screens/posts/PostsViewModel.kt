@@ -21,6 +21,8 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.laotoua.dawnislandk.data.local.dao.BlockedIdDao
+import com.laotoua.dawnislandk.data.local.entity.BlockedId
 import com.laotoua.dawnislandk.data.local.entity.Post
 import com.laotoua.dawnislandk.data.remote.APIDataResponse
 import com.laotoua.dawnislandk.data.remote.NMBServiceClient
@@ -31,7 +33,12 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
-class PostsViewModel @Inject constructor(private val webService: NMBServiceClient) : ViewModel() {
+class PostsViewModel @Inject constructor(
+    private val webService: NMBServiceClient,
+    private val blockedIdDao: BlockedIdDao
+) : ViewModel() {
+    private var blockedPostIds: MutableList<String>? = null
+    private var blockedForumIds: MutableList<String>? = null
     private val postList = mutableListOf<Post>()
     private val postIds = mutableSetOf<String>()
     private var _posts = MutableLiveData<MutableList<Post>>()
@@ -46,6 +53,18 @@ class PostsViewModel @Inject constructor(private val webService: NMBServiceClien
 
     fun getPosts() {
         viewModelScope.launch {
+            if (blockedPostIds == null || blockedForumIds == null) {
+                val blockedIds = blockedIdDao.getAllBlockedIds()
+                blockedPostIds = mutableListOf()
+                blockedForumIds = mutableListOf()
+                for (blockedId in blockedIds){
+                    if (blockedId.isBlockedPost()){
+                        blockedPostIds!!.add(blockedId.id)
+                    } else if (blockedId.isTimelineBlockedForum()){
+                        blockedForumIds!!.add(blockedId.id)
+                    }
+                }
+            }
             _loadingStatus.postValue(SingleLiveEvent.create(LoadingStatus.LOADING))
             val fid = _currentFid ?: "-1"
             Timber.d("Getting threads from $fid on page $pageCount")
@@ -65,7 +84,10 @@ class PostsViewModel @Inject constructor(private val webService: NMBServiceClien
     private fun convertServerData(data: List<Post>, fid: String) {
         // assign fid if not timeline
         if (fid != "-1") data.map { it.fid = fid }
-        val noDuplicates = data.filterNot { postIds.contains(it.id) }
+        val noDuplicates = data
+            .filterNot { postIds.contains(it.id) }
+            .filterNot { blockedPostIds?.contains(it.id) ?: false }
+            .filterNot { fid == "-1" && (blockedForumIds?.contains(it.fid) ?: false) }
         pageCount += 1
         if (noDuplicates.isNotEmpty()) {
             postIds.addAll(noDuplicates.map { it.id })
@@ -103,5 +125,14 @@ class PostsViewModel @Inject constructor(private val webService: NMBServiceClien
         postIds.clear()
         pageCount = 1
         getPosts()
+    }
+
+    fun blockPost(post: Post) {
+        blockedPostIds?.add(post.id)
+        postList.remove(post)
+        postIds.remove(post.id)
+        viewModelScope.launch {
+            blockedIdDao.insert(BlockedId.makeBlockedPost(post.id))
+        }
     }
 }

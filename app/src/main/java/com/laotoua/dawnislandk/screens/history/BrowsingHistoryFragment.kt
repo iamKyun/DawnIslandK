@@ -22,7 +22,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
-import android.widget.Toast
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Observer
 import androidx.navigation.fragment.findNavController
@@ -42,6 +41,7 @@ import com.laotoua.dawnislandk.databinding.FragmentHistoryBrowsingBinding
 import com.laotoua.dawnislandk.screens.SharedViewModel
 import com.laotoua.dawnislandk.screens.adapters.*
 import com.laotoua.dawnislandk.screens.posts.PostCardFactory
+import com.laotoua.dawnislandk.screens.util.Layout.toast
 import com.laotoua.dawnislandk.screens.widgets.BaseNavFragment
 import com.laotoua.dawnislandk.screens.widgets.popups.ImageViewerPopup
 import com.laotoua.dawnislandk.util.ReadableTime
@@ -59,6 +59,8 @@ class BrowsingHistoryFragment : BaseNavFragment() {
     private var binding: FragmentHistoryBrowsingBinding? = null
 
     private var mAdapter: QuickMultiBinder? = null
+
+    private var viewCaching = false
 
     private val viewModel: BrowsingHistoryViewModel by viewModels { viewModelFactory }
 
@@ -92,6 +94,7 @@ class BrowsingHistoryFragment : BaseNavFragment() {
             binding!!.startDate.text = ReadableTime.getDateString(startDate.time.time)
             binding!!.endDate.text = ReadableTime.getDateString(endDate.time.time)
             binding!!.startDate.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 MaterialDialog(requireContext()).show {
                     datePicker(currentDate = startDate) { _, date ->
                         setStartDate(date)
@@ -100,6 +103,7 @@ class BrowsingHistoryFragment : BaseNavFragment() {
             }
 
             binding!!.endDate.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 MaterialDialog(requireContext()).show {
                     datePicker(currentDate = endDate) { _, date ->
                         setEndDate(date)
@@ -108,58 +112,50 @@ class BrowsingHistoryFragment : BaseNavFragment() {
             }
 
             binding!!.confirmDate.setOnClickListener {
+                if (activity == null || !isAdded) return@setOnClickListener
                 if (startDate.before(endDate)) {
                     viewModel.searchByDate()
                 } else {
-                    Toast.makeText(context, R.string.data_range_selection_error, Toast.LENGTH_SHORT)
-                        .show()
+                    toast(R.string.data_range_selection_error)
                 }
             }
         }
+        viewModel.browsingHistoryList.observe(
+            viewLifecycleOwner,
+            Observer<List<BrowsingHistoryAndPost>> { list ->
+                if (mAdapter == null || binding == null) return@Observer
+                if (list.isEmpty()) {
+                    if (!mAdapter!!.hasEmptyView()) mAdapter?.setDefaultEmptyView()
+                    mAdapter!!.setDiffNewData(null)
+                    return@Observer
+                }
+                var lastDate: String? = null
+                val data: MutableList<Any> = ArrayList()
+                list.map {
+                    val dateString = ReadableTime.getDateString(
+                        it.browsingHistory.browsedDate,
+                        ReadableTime.DATE_ONLY_FORMAT
+                    )
+                    if (lastDate == null || dateString != lastDate) {
+                        data.add(dateString)
+                    }
+                    if (it.post != null) {
+                        data.add(it.post)
+                        lastDate = dateString
+                    }
+                }
+                mAdapter!!.setDiffNewData(data)
+                mAdapter!!.setFooterView(
+                    layoutInflater.inflate(
+                        R.layout.view_no_more_data,
+                        binding!!.recyclerView,
+                        false
+                    )
+                )
+                Timber.i("${this.javaClass.simpleName} Adapter will have ${list.size} items")
+            })
+        viewCaching = false
         return binding!!.root
-    }
-
-    private val listObs = Observer<List<BrowsingHistoryAndPost>> { list ->
-        if (mAdapter == null || binding == null) return@Observer
-        if (list.isEmpty()) {
-            if (!mAdapter!!.hasEmptyView()) mAdapter?.setDefaultEmptyView()
-            mAdapter!!.setDiffNewData(null)
-            return@Observer
-        }
-        var lastDate: String? = null
-        val data: MutableList<Any> = ArrayList()
-        list.map {
-            val dateString = ReadableTime.getDateString(
-                it.browsingHistory.browsedDate,
-                ReadableTime.DATE_ONLY_FORMAT
-            )
-            if (lastDate == null || dateString != lastDate) {
-                data.add(dateString)
-            }
-            if (it.post != null) {
-                data.add(it.post)
-                lastDate = dateString
-            }
-        }
-        mAdapter!!.setDiffNewData(data)
-        mAdapter!!.setFooterView(
-            layoutInflater.inflate(
-                R.layout.view_no_more_data,
-                binding!!.recyclerView,
-                false
-            )
-        )
-        Timber.i("${this.javaClass.simpleName} Adapter will have ${list.size} items")
-    }
-
-    override fun onResume() {
-        super.onResume()
-        viewModel.browsingHistoryList.observe(viewLifecycleOwner, listObs)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        viewModel.browsingHistoryList.removeObserver(listObs)
     }
 
     private fun setStartDate(date: Calendar) {
@@ -192,7 +188,7 @@ class BrowsingHistoryFragment : BaseNavFragment() {
                 data.replyCount,
                 sharedViewModel.getForumDisplayName(data.fid)
             )
-            holder.convertSage(data.sage, data.skipSageConversion())
+            holder.convertSage(data.sage, data.isStickyTopBanner())
             holder.convertImage(data.getImgUrl())
             holder.convertContent(context, data.content)
         }
@@ -206,11 +202,14 @@ class BrowsingHistoryFragment : BaseNavFragment() {
         }
 
         override fun onClick(holder: BaseViewHolder, view: View, data: Post, position: Int) {
+            if (activity == null || !isAdded) return
+            viewCaching = DawnApp.applicationDataStore.getViewCaching()
             val navAction = MainNavDirections.actionGlobalCommentsFragment(data.id, data.fid)
             findNavController().navigate(navAction)
         }
 
         override fun onChildClick(holder: BaseViewHolder, view: View, data: Post, position: Int) {
+            if (activity == null || !isAdded) return
             if (view.id == R.id.attachedImage) {
                 val viewerPopup = ImageViewerPopup(context)
                 viewerPopup.setSingleSrcView(view as ImageView?, data)
@@ -223,7 +222,7 @@ class BrowsingHistoryFragment : BaseNavFragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        if (!DawnApp.applicationDataStore.getViewCaching()) {
+        if (!viewCaching) {
             mAdapter = null
             binding = null
         }

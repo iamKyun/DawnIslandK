@@ -44,6 +44,7 @@ class ApplicationDataStore @Inject constructor(
     private val NMBNoticeDao: NMBNoticeDao,
     private val luweiNoticeDao: LuweiNoticeDao,
     private val releaseDao: ReleaseDao,
+    private val blockedIdDao: BlockedIdDao,
     private val webService: NMBServiceClient
 ) {
 
@@ -77,11 +78,31 @@ class ApplicationDataStore @Inject constructor(
         mmkv.putString(DawnConstants.FEED_ID, value)
     }
 
+    private var defaultForumId: String? = null
 
-    val firstTimeUse by lazyOnMainOnly { mmkv.getBoolean(DawnConstants.USE_APP_FIRST_TIME, false) }
+    fun getDefaultForumId(): String {
+        if (defaultForumId == null) {
+            defaultForumId = mmkv.getString(DawnConstants.DEFAULT_FORUM_ID, "-1")
+        }
+        return defaultForumId!!
+    }
+
+    fun setDefaultForumId(fid: String) {
+        defaultForumId = fid
+        mmkv.putString(DawnConstants.DEFAULT_FORUM_ID, fid)
+    }
+
+    private var firstTimeUse: Boolean? = null
+
+    fun getFirstTimeUse(): Boolean {
+        if (firstTimeUse == null) {
+            firstTimeUse = mmkv.getBoolean(DawnConstants.USE_APP_FIRST_TIME, true)
+        }
+        return firstTimeUse!!
+    }
 
     fun setFirstTimeUse() {
-        mmkv.putBoolean(DawnConstants.USE_APP_FIRST_TIME, true)
+        mmkv.putBoolean(DawnConstants.USE_APP_FIRST_TIME, false)
     }
 
     // View settings
@@ -102,6 +123,32 @@ class ApplicationDataStore @Inject constructor(
     fun setLayoutCustomizationStatus(value: Boolean) {
         layoutCustomizationStatus = value
         mmkv.putBoolean(DawnConstants.LAYOUT_CUSTOMIZATION, value)
+    }
+
+    private var customToolbarImageStatus: Boolean? = null
+    fun getCustomToolbarImageStatus(): Boolean {
+        if (customToolbarImageStatus == null) {
+            customToolbarImageStatus = mmkv.getBoolean(DawnConstants.CUSTOM_TOOLBAR_STATUS, false)
+        }
+        return customToolbarImageStatus!!
+    }
+
+    fun setCustomToolbarImageStatus(value: Boolean) {
+        customToolbarImageStatus = value
+        mmkv.putBoolean(DawnConstants.CUSTOM_TOOLBAR_STATUS, value)
+    }
+
+    private var customToolbarImagePath: String? = null
+    fun getCustomToolbarImagePath(): String {
+        if (customToolbarImagePath == null) {
+            customToolbarImagePath = mmkv.getString(DawnConstants.TOOLBAR_IMAGE_PATH, "")
+        }
+        return customToolbarImagePath!!
+    }
+
+    fun setCustomToolbarImagePath(value: String) {
+        customToolbarImagePath = value
+        mmkv.putString(DawnConstants.TOOLBAR_IMAGE_PATH, value)
     }
 
     val displayTimeFormat by lazyOnMainOnly {
@@ -184,6 +231,10 @@ class ApplicationDataStore @Inject constructor(
 
     fun nukeCommentTable() {
         GlobalScope.launch { commentDao.nukeTable() }
+    }
+
+    fun nukeBlockedPostTable() {
+        GlobalScope.launch { blockedIdDao.nukeBlockedPostIds() }
     }
 
     suspend fun getLatestNMBNotice(): NMBNotice? {

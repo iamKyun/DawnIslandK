@@ -23,11 +23,14 @@ import com.laotoua.dawnislandk.data.local.entity.Community
 
 @Dao
 interface CommunityDao {
-    @Query("SELECT * FROM Community")
+    @Query("SELECT * FROM Community ORDER BY sort ASC")
     fun getAll(): LiveData<List<Community>>
 
     @Query("SELECT * FROM Community WHERE id=:id")
     suspend fun getCommunityById(id: String): Community
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(community: Community)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(communityList: List<Community>)

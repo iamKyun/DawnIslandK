@@ -18,7 +18,6 @@
 package com.laotoua.dawnislandk.screens.subscriptions
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.liveData
 import com.laotoua.dawnislandk.data.repository.TrendRepository
 import timber.log.Timber
 import javax.inject.Inject
@@ -27,8 +26,8 @@ class TrendsViewModel @Inject constructor(
     private val trendRepo: TrendRepository
 ) : ViewModel() {
 
-    var latestTrends = liveData{ emitSource(trendRepo.getLatestTrend()) }
-    private set
+    var latestTrends = trendRepo.getLatestTrend()
+        private set
 
     fun getLatestTrend() {
         Timber.d("Refreshing Trend...")

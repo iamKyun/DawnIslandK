@@ -117,4 +117,11 @@ object DatabaseModule {
     fun provideFeedDao(dawnDatabase: DawnDatabase): FeedDao {
         return dawnDatabase.feedDao()
     }
+
+    @JvmStatic
+    @Provides
+    @Singleton
+    fun provideBlockedIdDao(dawnDatabase: DawnDatabase): BlockedIdDao {
+        return dawnDatabase.blockedIdDao()
+    }
 }
